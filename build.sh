@@ -9,10 +9,12 @@ export TOOLCHAIN_ROOT=$ANDROID_NDK
 ### DERIVED CONFIG
 #############################################################
 export SYS_ROOT=$SYSROOT
-export BUILD_ROOT=$(dirname $(readlink -f "$0"))
+export BUILD_ROOT=$SCRIPT_HOME_DIR/gnuradio-android
 export PATH=${TOOLCHAIN_BIN}:${PATH}
-export PREFIX=${BUILD_ROOT}/toolchain/armeabi-v7a
-export NCORES=$(getconf _NPROCESSORS_ONLN)
+export PREFIX=$DEV_PREFIX
+#export PREFIX=${BUILD_ROOT}/toolchain/$ABI
+#export NCORES=$(getconf _NPROCESSORS_ONLN)
+export NCORES=$JOBS
 
 mkdir -p ${PREFIX}
 
@@ -25,12 +27,13 @@ build_boost() {
 
 ## ADI COMMENT PULL LATEST
 
-cd ${BUILD_ROOT}/Boost-for-Android
+pushd ${BUILD_ROOT}/Boost-for-Android
 git clean -xdf
 
-#./build-android.sh --boost=1.69.0 --toolchain=llvm --prefix=$(dirname ${PREFIX}) --arch=armeabi-v7a --target-version=28 ${TOOLCHAIN_ROOT}
+#./build-android.sh --boost=1.69.0 --toolchain=llvm --prefix=$(dirname ${PREFIX}) --arch=$ABI --target-version=28 ${TOOLCHAIN_ROOT}
 
-./build-android.sh --boost=1.69.0 --layout=system --toolchain=llvm --prefix=$(dirname ${PREFIX}) --arch=armeabi-v7a --target-version=28 ${TOOLCHAIN_ROOT}
+./build-android.sh --boost=1.69.0 --layout=system --toolchain=llvm --prefix=$(dirname ${PREFIX}) --arch=$ABI --target-version=28 ${TOOLCHAIN_ROOT}
+popd
 }
 
 #############################################################
@@ -38,17 +41,18 @@ git clean -xdf
 #############################################################
 
 build_libzmq() {
-cd ${BUILD_ROOT}/libzmq
+pushd ${BUILD_ROOT}/libzmq
 git clean -xdf
 
 ./autogen.sh
-./configure --enable-static --disable-shared --host=arm-linux-androideabi --prefix=${PREFIX} LDFLAGS="-L${PREFIX}/lib" CPPFLAGS="-fPIC -I${PREFIX}/include" LIBS="-lgcc"
+./configure --enable-static --disable-shared --host=$TARGET_BINUTILS --prefix=${PREFIX} LDFLAGS="-L${PREFIX}/lib" CPPFLAGS="-fPIC -I${PREFIX}/include" LIBS="-lgcc"
 
 make -j ${NCORES}
 make install
 
 # CXX Header-Only Bindings
 wget -O $PREFIX/include/zmq.hpp https://raw.githubusercontent.com/zeromq/cppzmq/master/zmq.hpp
+popd
 }
 
 #############################################################
@@ -56,27 +60,36 @@ wget -O $PREFIX/include/zmq.hpp https://raw.githubusercontent.com/zeromq/cppzmq/
 #############################################################
 build_fftw() {
 ## ADI COMMENT: USE downloaded version instead (OCAML fail?)
-cd ${BUILD_ROOT}/
+pushd ${BUILD_ROOT}/
 #wget http://www.fftw.org/fftw-3.3.9.tar.gz
 rm -rf fftw-3.3.9
 tar xvf fftw-3.3.9.tar.gz
 cd fftw-3.3.9
 #git clean -xdf
 
-./configure --enable-single --enable-static --enable-threads \
-  --enable-float  --enable-neon --disable-doc \
-  --host=arm-linux-androideabi \
+if [ "$ABI" = "armeabi-v7a" ] || [ "$ABI" = "arm64-v8a" ]; then
+	NEON_FLAG=--enable-neon
+else
+	NEON_FLAG=""
+fi
+echo $NEON_FLAG
+
+
+./bootstrap.sh --enable-single --enable-static --enable-threads \
+  --enable-float  $NEON_FLAG --disable-doc \
+  --host=$TARGET_BINUTILS \
   --prefix=$PREFIX
 
 make -j ${NCORES}
 make install
+popd
 }
 
 #############################################################
 ### OPENSSL
 #############################################################
 build_openssl() {
-cd ${BUILD_ROOT}/openssl
+pushd ${BUILD_ROOT}/openssl
 git clean -xdf
 
 export ANDROID_NDK_HOME=${TOOLCHAIN_ROOT}
@@ -84,13 +97,14 @@ export ANDROID_NDK_HOME=${TOOLCHAIN_ROOT}
 ./Configure android-arm -D__ARM_MAX_ARCH__=7 --prefix=${PREFIX} shared no-ssl3 no-comp
 make -j ${NCORES}
 make install
+popd
 }
 
 #############################################################
 ### THRIFT
 #############################################################
 build_thrift() {
-cd ${BUILD_ROOT}/thrift
+pushd ${BUILD_ROOT}/thrift
 git clean -xdf
 rm -rf ${PREFIX}/include/thrift
 
@@ -103,7 +117,7 @@ LDFLAGS="-L${PREIX}/lib" \
 ./configure --prefix=${PREFIX}   --disable-tests --disable-tutorial --with-cpp \
  --without-python --without-qt4 --without-qt5 --without-py3 --without-go --without-nodejs --without-c_glib --without-php --without-csharp --without-java \
  --without-libevent --without-zlib \
- --with-boost=${PREFIX} --host=arm-linux-androideabi --build=x86_64-linux
+ --with-boost=${PREFIX} --host=$TARGET_BINUTILS --build=x86_64-linux
 
 sed -i '/malloc rpl_malloc/d' ./lib/cpp/src/thrift/config.h
 sed -i '/realloc rpl_realloc/d' ./lib/cpp/src/thrift/config.h
@@ -113,73 +127,78 @@ make install
 
 sed -i '/malloc rpl_malloc/d' ${PREFIX}/include/thrift/config.h
 sed -i '/realloc rpl_realloc/d' ${PREFIX}/include/thrift/config.h
+popd
 }
 
 #############################################################
 ### GMP
 #############################################################
 build_libgmp() {
+pushd ${BUILD_ROOT}/libgmp
 ABI_BACKUP=$ABI
 ABI=""
-cd ${BUILD_ROOT}/libgmp
 git clean -xdf
 
 ./.bootstrap
 ./configure --enable-maintainer-mode --prefix=${PREFIX} \
-            --host=arm-linux-androideabi \
+            --host=$TARGET_BINUTILS \
             --enable-cxx
 make -j ${NCORES}
 make install
 ABI=$ABI_BACKUP
+popd
 }
 
 #############################################################
 ### LIBUSB
 #############################################################
 build_libusb() {
-cd ${BUILD_ROOT}/libusb/android/jni
+pushd ${BUILD_ROOT}/libusb/android/jni
 git clean -xdf
 
 export NDK=${TOOLCHAIN_ROOT}
 ${NDK}/ndk-build
 
-cp ${BUILD_ROOT}/libusb/android/libs/armeabi-v7a/* ${PREFIX}/lib
+cp ${BUILD_ROOT}/libusb/android/libs/$ABI/* ${PREFIX}/lib
+mv ${PREFIX}/lib/libusb1.0.so $PREFIX/lib/libusb-1.0.so # IDK why this happens (?)
 cp ${BUILD_ROOT}/libusb/libusb/libusb.h ${PREFIX}/include
+popd
 }
 
 #############################################################
 ### HACK RF
 #############################################################
 build_hackrf() {
-cd ${BUILD_ROOT}/hackrf/host/
+pushd ${BUILD_ROOT}/hackrf/host/
 git clean -xdf
 
 mkdir build
 cd build
 
-cmake -DCMAKE_INSTALL_PREFIX=${PREFIX} \
+$CMAKE -DCMAKE_INSTALL_PREFIX=${PREFIX} \
   -DCMAKE_TOOLCHAIN_FILE=${TOOLCHAIN_ROOT}/build/cmake/android.toolchain.cmake \
-  -DANDROID_ABI=armeabi-v7a -DANDROID_ARM_NEON=ON \
-  -DANDROID_NATIVE_API_LEVEL=${API_LEVEL} \
+  -DANDROID_ABI=$ABI -DANDROID_ARM_NEON=ON \
+  -DANDROID_NATIVE_API_LEVEL=28 \
   -DCMAKE_FIND_ROOT_PATH=${PREFIX} \
   ../
 
 make -j ${NCORES}
 make install
+popd
 }
 
 # #############################################################
 # ### VOLK
 #############################################################
 build_volk() {
-cd ${BUILD_ROOT}/volk
+pushd ${BUILD_ROOT}/volk
 git clean -xdf
 
 mkdir build
 cd build
-cmake -DCMAKE_INSTALL_PREFIX=${PREFIX} \
+$CMAKE -DCMAKE_INSTALL_PREFIX=${PREFIX} \
   -DCMAKE_TOOLCHAIN_FILE=${TOOLCHAIN_ROOT}/build/cmake/android.toolchain.cmake \
-  -DANDROID_ABI=armeabi-v7a -DANDROID_ARM_NEON=ON \
+  -DANDROID_ABI=$ABI -DANDROID_ARM_NEON=ON \
   -DANDROID_STL=c++_shared \
   -DANDROID_NATIVE_API_LEVEL=28 \
   -DPYTHON_EXECUTABLE=/usr/bin/python3 \
@@ -187,18 +206,21 @@ cmake -DCMAKE_INSTALL_PREFIX=${PREFIX} \
   -DBoost_COMPILER=-clang \
   -DBoost_USE_STATIC_LIBS=ON \
   -DBoost_ARCHITECTURE=-a32 \
-  -DENABLE_STATIC_LIBS=True \
+  -DENABLE_STATIC_LIBS=False \
   -DCMAKE_FIND_ROOT_PATH=${PREFIX} \
+  -DCMAKE_EXE_LINKER_FLAGS=$LDFLAGS \
+  -DCMAKE_VERBOSE_MAKEFILE=ON \
   ../
 make -j ${NCORES}
 make install
+popd
 }
 
 #############################################################
 ### GNU Radio
 #############################################################
 build_gnuradio() {
-cd ${BUILD_ROOT}/gnuradio
+pushd ${BUILD_ROOT}/gnuradio
 git clean -xdf
 
 mkdir build
@@ -206,9 +228,9 @@ cd build
 
 echo $LDFLAGS
 
-cmake -DCMAKE_INSTALL_PREFIX=${PREFIX} \
+$CMAKE -DCMAKE_INSTALL_PREFIX=${PREFIX} \
   -DCMAKE_TOOLCHAIN_FILE=${TOOLCHAIN_ROOT}/build/cmake/android.toolchain.cmake \
-  -DANDROID_ABI=armeabi-v7a -DANDROID_ARM_NEON=ON \
+  -DANDROID_ABI=$ABI -DANDROID_ARM_NEON=ON \
   -DANDROID_STL=c++_shared \
   -DANDROID_NATIVE_API_LEVEL=28 \
   -DPYTHON_EXECUTABLE=/usr/bin/python3 \
@@ -238,97 +260,104 @@ cmake -DCMAKE_INSTALL_PREFIX=${PREFIX} \
    ../
 make -j ${NCORES}
 make install
+popd
 }
 
 #############################################################
 ### GR OSMOSDR
 #############################################################
 build_gr-osmosdr() {
-cd ${BUILD_ROOT}/gr-osmosdr
+pushd ${BUILD_ROOT}/gr-osmosdr
 git clean -xdf
 
 mkdir build
 cd build
 
-cmake -DCMAKE_INSTALL_PREFIX=${PREFIX} \
+$CMAKE -DCMAKE_INSTALL_PREFIX=${PREFIX} \
   -DCMAKE_TOOLCHAIN_FILE=${TOOLCHAIN_ROOT}/build/cmake/android.toolchain.cmake \
-  -DANDROID_ABI=armeabi-v7a -DANDROID_ARM_NEON=ON \
-  -DANDROID_NATIVE_API_LEVEL=${API_LEVEL} \
+  -DANDROID_ABI=$ABI -DANDROID_ARM_NEON=ON \
+  -DANDROID_NATIVE_API_LEVEL=28 \
   -DBOOST_ROOT=${PREFIX} \
+  -DANDROID_STL=c++_shared \
   -DBoost_COMPILER=-clang \
   -DBoost_USE_STATIC_LIBS=ON \
   -DBoost_ARCHITECTURE=-a32 \
-  -DGnuradio_DIR=${BUILD_ROOT}/toolchain/armeabi-v7a/lib/cmake/gnuradio \
+  -DGnuradio_DIR=${BUILD_ROOT}/toolchain/$ABI/lib/cmake/gnuradio \
   -DENABLE_REDPITAYA=OFF \
   -DENABLE_RFSPACE=OFF \
   -DCMAKE_FIND_ROOT_PATH=${PREFIX} \
   ../
 make -j ${NCORES}
 make install
+popd
 }
 
 #############################################################
 ### GR GRAND
 #############################################################
 build_gr-grand() {
-cd ${BUILD_ROOT}/gr-grand
+pushd ${BUILD_ROOT}/gr-grand
 git clean -xdf
 
 mkdir build
 cd build
 
-cmake -DCMAKE_INSTALL_PREFIX=${PREFIX} \
+$CMAKE -DCMAKE_INSTALL_PREFIX=${PREFIX} \
   -DCMAKE_TOOLCHAIN_FILE=${TOOLCHAIN_ROOT}/build/cmake/android.toolchain.cmake \
-  -DANDROID_ABI=armeabi-v7a -DANDROID_ARM_NEON=ON \
-  -DANDROID_NATIVE_API_LEVEL=${API_LEVEL} \
+  -DANDROID_ABI=$ABI -DANDROID_ARM_NEON=ON \
+  -DANDROID_NATIVE_API_LEVEL=28 \
+  -DANDROID_STL=c++_shared \
   -DBOOST_ROOT=${PREFIX} \
   -DBoost_COMPILER=-clang \
   -DBoost_USE_STATIC_LIBS=ON \
   -DBoost_ARCHITECTURE=-a32 \
-  -DGnuradio_DIR=${BUILD_ROOT}/toolchain/armeabi-v7a/lib/cmake/gnuradio \
+  -DGnuradio_DIR=${BUILD_ROOT}/toolchain/$ABI/lib/cmake/gnuradio \
   -DCMAKE_FIND_ROOT_PATH=${PREFIX} \
     ../
 
 make -j ${NCORES}
 make install
+popd
 }
 
 #############################################################
 ### GR SCHED
 #############################################################
 build_gr-sched() {
-cd ${BUILD_ROOT}/gr-sched
+pushd ${BUILD_ROOT}/gr-sched
 git clean -xdf
 
 mkdir build
 cd build
 
-cmake -DCMAKE_INSTALL_PREFIX=${PREFIX} \
+$CMAKE -DCMAKE_INSTALL_PREFIX=${PREFIX} \
   -DCMAKE_TOOLCHAIN_FILE=${TOOLCHAIN_ROOT}/build/cmake/android.toolchain.cmake \
-  -DANDROID_ABI=armeabi-v7a -DANDROID_ARM_NEON=ON \
-  -DANDROID_NATIVE_API_LEVEL=${API_LEVEL} \
+  -DANDROID_ABI=$ABI -DANDROID_ARM_NEON=ON \
+  -DANDROID_STL=c++_shared \
+  -DANDROID_NATIVE_API_LEVEL=28 \
   -DBOOST_ROOT=${PREFIX} \
   -DBoost_COMPILER=-clang \
   -DBoost_USE_STATIC_LIBS=ON \
   -DBoost_ARCHITECTURE=-a32 \
-  -DGnuradio_DIR=${BUILD_ROOT}/toolchain/armeabi-v7a/lib/cmake/gnuradio \
+  -DGnuradio_DIR=${BUILD_ROOT}/toolchain/$ABI/lib/cmake/gnuradio \
   -DCMAKE_FIND_ROOT_PATH=${PREFIX} \
   ../
 
 make -j ${NCORES}
 make install
+popd
 }
 
-build_boost
-build_libzmq
-build_fftw
-#build_openssl
-#build_thrift
-build_libgmp
-build_libusb
-#build_hackrf
-build_volk
-build_gnuradio
-#build_gr-osmosdr
-#build_gr-grand
-#build_gr-sched
+#build_boost
+#build_libzmq
+#build_fftw
+##build_openssl
+##build_thrift
+#build_libgmp
+#build_libusb
+##build_hackrf
+#build_volk
+#build_gnuradio
+##build_gr-osmosdr
+##build_gr-grand
+##build_gr-sched
