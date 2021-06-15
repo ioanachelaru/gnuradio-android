@@ -3,18 +3,15 @@ set -xe
 #############################################################
 ### CONFIG
 #############################################################
-export TOOLCHAIN_ROOT=$ANDROID_NDK
 
 #############################################################
 ### DERIVED CONFIG
 #############################################################
-export SYS_ROOT=$SYSROOT
+#export SYS_ROOT=$SYSROOT
 export BUILD_ROOT=$SCRIPT_HOME_DIR/gnuradio-android
 export PATH=${TOOLCHAIN_BIN}:${PATH}
 export PREFIX=$DEV_PREFIX
 #export PREFIX=${BUILD_ROOT}/toolchain/$ABI
-#export NCORES=$(getconf _NPROCESSORS_ONLN)
-export NCORES=$JOBS
 
 mkdir -p ${PREFIX}
 
@@ -30,9 +27,9 @@ build_boost() {
 pushd ${BUILD_ROOT}/Boost-for-Android
 git clean -xdf
 
-#./build-android.sh --boost=1.69.0 --toolchain=llvm --prefix=$(dirname ${PREFIX}) --arch=$ABI --target-version=28 ${TOOLCHAIN_ROOT}
+#./build-android.sh --boost=1.69.0 --toolchain=llvm --prefix=$(dirname ${PREFIX}) --arch=$ABI --target-version=28 ${ANDROID_NDK_ROOT}
 
-./build-android.sh --boost=1.69.0 --layout=system --toolchain=llvm --prefix=$(dirname ${PREFIX}) --arch=$ABI --target-version=28 ${TOOLCHAIN_ROOT}
+./build-android.sh --boost=1.69.0 --layout=system --toolchain=llvm --prefix=${PREFIX} --arch=$ABI --target-version=28 ${ANDROID_NDK_ROOT}
 popd
 }
 
@@ -47,7 +44,7 @@ git clean -xdf
 ./autogen.sh
 ./configure --enable-static --disable-shared --host=$TARGET_BINUTILS --prefix=${PREFIX} LDFLAGS="-L${PREFIX}/lib" CPPFLAGS="-fPIC -I${PREFIX}/include" LIBS="-lgcc"
 
-make -j ${NCORES}
+make -j ${JOBS}
 make install
 
 # CXX Header-Only Bindings
@@ -80,7 +77,7 @@ echo $NEON_FLAG
   --host=$TARGET_BINUTILS \
   --prefix=$PREFIX
 
-make -j ${NCORES}
+make -j ${JOBS}
 make install
 popd
 }
@@ -92,10 +89,10 @@ build_openssl() {
 pushd ${BUILD_ROOT}/openssl
 git clean -xdf
 
-export ANDROID_NDK_HOME=${TOOLCHAIN_ROOT}
+export ANDROID_NDK_HOME=${ANDROID_NDK_ROOT}
 
 ./Configure android-arm -D__ARM_MAX_ARCH__=7 --prefix=${PREFIX} shared no-ssl3 no-comp
-make -j ${NCORES}
+make -j ${JOBS}
 make install
 popd
 }
@@ -113,7 +110,7 @@ rm -rf ${PREFIX}/include/thrift
 CPPFLAGS="-I${PREFIX}/include" \
 CFLAGS="-fPIC" \
 CXXFLAGS="-fPIC" \
-LDFLAGS="-L${PREIX}/lib" \
+LDFLAGS="-L${PREFIX}/lib" \
 ./configure --prefix=${PREFIX}   --disable-tests --disable-tutorial --with-cpp \
  --without-python --without-qt4 --without-qt5 --without-py3 --without-go --without-nodejs --without-c_glib --without-php --without-csharp --without-java \
  --without-libevent --without-zlib \
@@ -122,7 +119,7 @@ LDFLAGS="-L${PREIX}/lib" \
 sed -i '/malloc rpl_malloc/d' ./lib/cpp/src/thrift/config.h
 sed -i '/realloc rpl_realloc/d' ./lib/cpp/src/thrift/config.h
 
-make -j ${NCORES}
+make -j ${JOBS}
 make install
 
 sed -i '/malloc rpl_malloc/d' ${PREFIX}/include/thrift/config.h
@@ -143,7 +140,7 @@ git clean -xdf
 ./configure --enable-maintainer-mode --prefix=${PREFIX} \
             --host=$TARGET_BINUTILS \
             --enable-cxx
-make -j ${NCORES}
+make -j ${JOBS}
 make install
 ABI=$ABI_BACKUP
 popd
@@ -154,10 +151,15 @@ popd
 #############################################################
 build_libusb() {
 pushd ${BUILD_ROOT}/libusb/android/jni
+# WE NEED TO USE BetterAndroidSupport PR from libusb
+# this will be merged to mainline soon
+# https://github.com/libusb/libusb/pull/874
+
 git clean -xdf
 
-export NDK=${TOOLCHAIN_ROOT}
-${NDK}/ndk-build
+export NDK=${ANDROID_NDK_ROOT}
+${NDK}/ndk-build clean
+${NDK}/ndk-build -B -r -R
 
 cp ${BUILD_ROOT}/libusb/android/libs/$ABI/* ${PREFIX}/lib
 mv ${PREFIX}/lib/libusb1.0.so $PREFIX/lib/libusb-1.0.so # IDK why this happens (?)
@@ -176,13 +178,13 @@ mkdir build
 cd build
 
 $CMAKE -DCMAKE_INSTALL_PREFIX=${PREFIX} \
-  -DCMAKE_TOOLCHAIN_FILE=${TOOLCHAIN_ROOT}/build/cmake/android.toolchain.cmake \
+  -DCMAKE_TOOLCHAIN_FILE=${ANDROID_NDK_ROOT}/build/cmake/android.toolchain.cmake \
   -DANDROID_ABI=$ABI -DANDROID_ARM_NEON=ON \
   -DANDROID_NATIVE_API_LEVEL=28 \
   -DCMAKE_FIND_ROOT_PATH=${PREFIX} \
   ../
 
-make -j ${NCORES}
+make -j ${JOBS}
 make install
 popd
 }
@@ -197,7 +199,7 @@ git clean -xdf
 mkdir build
 cd build
 $CMAKE -DCMAKE_INSTALL_PREFIX=${PREFIX} \
-  -DCMAKE_TOOLCHAIN_FILE=${TOOLCHAIN_ROOT}/build/cmake/android.toolchain.cmake \
+  -DCMAKE_TOOLCHAIN_FILE=${ANDROID_NDK_ROOT}/build/cmake/android.toolchain.cmake \
   -DANDROID_ABI=$ABI -DANDROID_ARM_NEON=ON \
   -DANDROID_STL=c++_shared \
   -DANDROID_NATIVE_API_LEVEL=28 \
@@ -211,7 +213,7 @@ $CMAKE -DCMAKE_INSTALL_PREFIX=${PREFIX} \
   -DCMAKE_EXE_LINKER_FLAGS=$LDFLAGS \
   -DCMAKE_VERBOSE_MAKEFILE=ON \
   ../
-make -j ${NCORES}
+make -j ${JOBS}
 make install
 popd
 }
@@ -229,7 +231,7 @@ cd build
 echo $LDFLAGS
 
 $CMAKE -DCMAKE_INSTALL_PREFIX=${PREFIX} \
-  -DCMAKE_TOOLCHAIN_FILE=${TOOLCHAIN_ROOT}/build/cmake/android.toolchain.cmake \
+  -DCMAKE_TOOLCHAIN_FILE=${ANDROID_NDK_ROOT}/build/cmake/android.toolchain.cmake \
   -DANDROID_ABI=$ABI -DANDROID_ARM_NEON=ON \
   -DANDROID_STL=c++_shared \
   -DANDROID_NATIVE_API_LEVEL=28 \
@@ -258,7 +260,7 @@ $CMAKE -DCMAKE_INSTALL_PREFIX=${PREFIX} \
   -DCMAKE_SHARED_LINKER_FLAGS=$LDFLAGS \
   -DCMAKE_VERBOSE_MAKEFILE=ON \
    ../
-make -j ${NCORES}
+make -j ${JOBS}
 make install
 popd
 }
@@ -274,7 +276,7 @@ mkdir build
 cd build
 
 $CMAKE -DCMAKE_INSTALL_PREFIX=${PREFIX} \
-  -DCMAKE_TOOLCHAIN_FILE=${TOOLCHAIN_ROOT}/build/cmake/android.toolchain.cmake \
+  -DCMAKE_TOOLCHAIN_FILE=${ANDROID_NDK_ROOT}/build/cmake/android.toolchain.cmake \
   -DANDROID_ABI=$ABI -DANDROID_ARM_NEON=ON \
   -DANDROID_NATIVE_API_LEVEL=28 \
   -DBOOST_ROOT=${PREFIX} \
@@ -287,7 +289,7 @@ $CMAKE -DCMAKE_INSTALL_PREFIX=${PREFIX} \
   -DENABLE_RFSPACE=OFF \
   -DCMAKE_FIND_ROOT_PATH=${PREFIX} \
   ../
-make -j ${NCORES}
+make -j ${JOBS}
 make install
 popd
 }
@@ -303,7 +305,7 @@ mkdir build
 cd build
 
 $CMAKE -DCMAKE_INSTALL_PREFIX=${PREFIX} \
-  -DCMAKE_TOOLCHAIN_FILE=${TOOLCHAIN_ROOT}/build/cmake/android.toolchain.cmake \
+  -DCMAKE_TOOLCHAIN_FILE=${ANDROID_NDK_ROOT}/build/cmake/android.toolchain.cmake \
   -DANDROID_ABI=$ABI -DANDROID_ARM_NEON=ON \
   -DANDROID_NATIVE_API_LEVEL=28 \
   -DANDROID_STL=c++_shared \
@@ -315,7 +317,7 @@ $CMAKE -DCMAKE_INSTALL_PREFIX=${PREFIX} \
   -DCMAKE_FIND_ROOT_PATH=${PREFIX} \
     ../
 
-make -j ${NCORES}
+make -j ${JOBS}
 make install
 popd
 }
@@ -331,7 +333,7 @@ mkdir build
 cd build
 
 $CMAKE -DCMAKE_INSTALL_PREFIX=${PREFIX} \
-  -DCMAKE_TOOLCHAIN_FILE=${TOOLCHAIN_ROOT}/build/cmake/android.toolchain.cmake \
+  -DCMAKE_TOOLCHAIN_FILE=${ANDROID_NDK_ROOT}/build/cmake/android.toolchain.cmake \
   -DANDROID_ABI=$ABI -DANDROID_ARM_NEON=ON \
   -DANDROID_STL=c++_shared \
   -DANDROID_NATIVE_API_LEVEL=28 \
@@ -343,7 +345,7 @@ $CMAKE -DCMAKE_INSTALL_PREFIX=${PREFIX} \
   -DCMAKE_FIND_ROOT_PATH=${PREFIX} \
   ../
 
-make -j ${NCORES}
+make -j ${JOBS}
 make install
 popd
 }
