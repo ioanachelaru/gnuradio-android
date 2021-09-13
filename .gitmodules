@@ -52,3 +52,6 @@
 [submodule "gr-ieee802-11"]
 	path = gr-ieee802-11
 	url = https://github.com/bastibl/gr-ieee802-11.git
+[submodule "gr-iio"]
+	path = gr-iio
+	url = https://github.com/analogdevicesinc/gr-iio
