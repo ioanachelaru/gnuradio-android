@@ -55,3 +55,6 @@
 [submodule "gr-iio"]
 	path = gr-iio
 	url = https://github.com/analogdevicesinc/gr-iio
+[submodule "libiio"]
+	path = libiio
+	url = https://github.com/analogdevicesinc/libiio
